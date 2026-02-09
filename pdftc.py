@@ -1,12 +1,16 @@
 #!/usr/bin/env python3
 import argparse
+import hashlib
+import os
 import re
+import shutil
 import sys
 
 import pikepdf
 
 
 NUMBERED_RE = re.compile(r"^(\s+)((\d+\.)+)(\d+)\s")
+CACHE_VERSION = "1"
 
 
 def apply_number_indent(line):
@@ -41,24 +45,144 @@ def walk_outline(items, level):
             yield from walk_outline(item, level)
 
 
+def get_cache_dir(override=None):
+    base = override or os.environ.get("XDG_CACHE_HOME")
+    if not base:
+        base = os.path.join(os.path.expanduser("~"), ".cache")
+    return os.path.join(base, "pdftc")
+
+
+def ensure_cache_dir(path):
+    os.makedirs(path, exist_ok=True)
+
+
+def clear_cache_dir(path):
+    if not os.path.isdir(path):
+        return
+    for name in os.listdir(path):
+        entry = os.path.join(path, name)
+        if os.path.isfile(entry) or os.path.islink(entry):
+            os.remove(entry)
+        elif os.path.isdir(entry):
+            shutil.rmtree(entry)
+
+
+def hash_file(path):
+    sha = hashlib.sha256()
+    with open(path, "rb") as handle:
+        while True:
+            chunk = handle.read(1024 * 1024)
+            if not chunk:
+                break
+            sha.update(chunk)
+    return sha.hexdigest()
+
+
+def cache_key(file_hash):
+    version = f"pdftc-cache-v{CACHE_VERSION}-pikepdf-{pikepdf.__version__}"
+    payload = f"{version}:{file_hash}".encode("utf-8")
+    return hashlib.sha256(payload).hexdigest()
+
+
+def read_cache(path):
+    try:
+        with open(path, "r", encoding="utf-8") as handle:
+            return handle.read()
+    except FileNotFoundError:
+        return None
+
+
+def write_cache(path, content):
+    tmp_path = f"{path}.tmp"
+    with open(tmp_path, "w", encoding="utf-8") as handle:
+        handle.write(content)
+    os.replace(tmp_path, path)
+
+
+def clear_cache_entry(path):
+    try:
+        os.remove(path)
+    except FileNotFoundError:
+        pass
+
+
 def parse_args():
     parser = argparse.ArgumentParser(
         prog="pdftc",
         description="Generate a table of contents from PDF bookmarks.",
     )
-    parser.add_argument("pdf", help="Path to PDF file")
+    parser.add_argument("pdf", nargs="?", help="Path to PDF file")
+    parser.add_argument(
+        "--cache-dir",
+        help="Override cache directory (default: XDG cache)",
+    )
+    parser.add_argument(
+        "--no-cache",
+        action="store_true",
+        help="Disable cache",
+    )
+    parser.add_argument(
+        "--cache-clear",
+        action="store_true",
+        help="Clear cache entry for this PDF before running",
+    )
+    parser.add_argument(
+        "--cache-clear-all",
+        action="store_true",
+        help="Clear all cached entries and exit",
+    )
     return parser.parse_args()
 
 
 def main():
     args = parse_args()
+    cache_dir = get_cache_dir(args.cache_dir)
+    cache_enabled = not args.no_cache
+
+    if args.cache_clear_all:
+        clear_cache_dir(cache_dir)
+        return 0
+
+    if not args.pdf:
+        print("pdf path required", file=sys.stderr)
+        return 1
+
+    cache_path = None
+    if cache_enabled or args.cache_clear:
+        try:
+            file_hash = hash_file(args.pdf)
+        except FileNotFoundError:
+            print(f"{args.pdf} does not exist", file=sys.stderr)
+            return 1
+        except Exception as exc:
+            print(f"failed to hash pdf: {exc}", file=sys.stderr)
+            return 1
+
+        cache_path = os.path.join(cache_dir, f"{cache_key(file_hash)}.txt")
+        if args.cache_clear:
+            clear_cache_entry(cache_path)
+        if cache_enabled:
+            cached_output = read_cache(cache_path)
+            if cached_output is not None:
+                sys.stdout.write(cached_output)
+                return 0
     try:
         with pikepdf.open(args.pdf) as pdf:
             outline = pdf.open_outline()
             if not outline or not outline.root:
+                if cache_enabled and cache_path:
+                    ensure_cache_dir(cache_dir)
+                    write_cache(cache_path, "")
                 return 0
-            for level, title in walk_outline(outline.root, 1):
-                print(format_line(level, title))
+            lines = [
+                format_line(level, title)
+                for level, title in walk_outline(outline.root, 1)
+            ]
+            output = "\n".join(lines) + "\n"
+            if cache_enabled and cache_path:
+                ensure_cache_dir(cache_dir)
+                write_cache(cache_path, output)
+            sys.stdout.write(output)
             return 0
     except FileNotFoundError:
         print(f"{args.pdf} does not exist", file=sys.stderr)

@@ -29,3 +29,18 @@ To generate a table of contents from a PDF file, run:
 ```
 
 The table of contents will be printed to standard output.
+
+## Cache
+
+By default, `pdftc` caches outputs under the XDG cache directory:
+
+```
+${XDG_CACHE_HOME:-~/.cache}/pdftc
+```
+
+Useful flags:
+
+- `--no-cache` to bypass caching.
+- `--cache-dir /path` to override the cache location.
+- `--cache-clear` to clear the cache entry for a specific PDF before running.
+- `--cache-clear-all` to wipe all cached entries and exit.
