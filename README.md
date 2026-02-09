@@ -46,5 +46,5 @@ Useful flags:
 - `--cache-clear-all` to wipe all cached entries and exit.
 - `--cache-info` to print cache hit/miss info to stderr.
 
-Cache keys are derived from the PDF xref/trailer region for speed. If a file
-changes without updating that region, you may get a stale cache hit.
+Cache keys are derived from the PDF head+tail for speed. If a file changes
+without touching those regions, you may get a stale cache hit.

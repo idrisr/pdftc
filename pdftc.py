@@ -68,17 +68,16 @@ def clear_cache_dir(path):
             shutil.rmtree(entry)
 
 
-def find_startxref_offset(tail):
-    index = tail.rfind(b"startxref")
-    if index == -1:
-        return None
-    match = re.search(rb"startxref\s+(\d+)", tail[index:])
-    if not match:
-        return None
-    try:
-        return int(match.group(1))
-    except ValueError:
-        return None
+def read_head_tail(path):
+    size = os.path.getsize(path)
+    if size <= TAIL_READ_SIZE * 2:
+        with open(path, "rb") as handle:
+            return handle.read(), b""
+    with open(path, "rb") as handle:
+        head = handle.read(TAIL_READ_SIZE)
+        handle.seek(size - TAIL_READ_SIZE)
+        tail = handle.read(TAIL_READ_SIZE)
+    return head, tail
 
 
 def read_tail(path):
@@ -92,21 +91,11 @@ def read_tail(path):
 
 
 def hash_xref_region(path):
-    tail, size = read_tail(path)
-    offset = find_startxref_offset(tail)
+    head, tail = read_head_tail(path)
     sha = hashlib.sha256()
-    if offset is None or offset < 0 or offset >= size:
-        sha.update(b"tail:")
-        sha.update(tail)
-        return sha.hexdigest()
-    with open(path, "rb") as handle:
-        handle.seek(offset)
-        sha.update(b"xref:")
-        while True:
-            chunk = handle.read(1024 * 1024)
-            if not chunk:
-                break
-            sha.update(chunk)
+    sha.update(b"head-tail:")
+    sha.update(head)
+    sha.update(tail)
     return sha.hexdigest()
 
 

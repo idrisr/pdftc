@@ -3,14 +3,13 @@ set -euo pipefail
 
 ROOT_DIR="${PDFTC_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
 FIXTURES_DIR="$ROOT_DIR/bench/fixtures"
-DUMPS_DIR="$ROOT_DIR/bench/dumps"
 RESULTS_FILE="$ROOT_DIR/bench/results.md"
-PIPELINE="$ROOT_DIR/bench/pdftc_pipeline.sh"
-PARSE_DUMP="$ROOT_DIR/bench/parse_dump.sh"
+CACHE_DIR="$ROOT_DIR/bench/cache"
 
 pdfs=(small medium deep wide numbered)
 
-mkdir -p "$DUMPS_DIR"
+mkdir -p "$CACHE_DIR"
+export XDG_CACHE_HOME="$CACHE_DIR"
 
 for name in "${pdfs[@]}"; do
   pdf="$FIXTURES_DIR/${name}.pdf"
@@ -20,26 +19,11 @@ for name in "${pdfs[@]}"; do
   fi
 done
 
-for name in "${pdfs[@]}"; do
-  pdf="$FIXTURES_DIR/${name}.pdf"
-  dump="$DUMPS_DIR/${name}.dump.txt"
-  if [[ ! -f "$dump" || "$dump" -ot "$pdf" || ! -s "$dump" ]]; then
-    pdftk "$pdf" dump_data_utf8 > "$dump"
-  fi
-  if ! rg --no-config --text -q "BookmarkTitle:" "$dump"; then
-    echo "no bookmarks found in dump: $dump" >&2
-    exit 1
-  fi
-done
-
 args=()
 for name in "${pdfs[@]}"; do
   pdf="$FIXTURES_DIR/${name}.pdf"
-  dump="$DUMPS_DIR/${name}.dump.txt"
-  args+=(-n "baseline-$name" "$PIPELINE \"$pdf\" > /dev/null")
-  args+=(-n "pdftk-$name" "pdftk \"$pdf\" dump_data_utf8 > /dev/null")
-  args+=(-n "parse-$name" "$PARSE_DUMP \"$dump\" > /dev/null")
-  args+=(-n "pikepdf-$name" "python \"$ROOT_DIR/pdftc.py\" \"$pdf\" > /dev/null")
+  args+=(-n "pdftc-$name-cold" "python \"$ROOT_DIR/pdftc.py\" --cache-clear \"$pdf\" > /dev/null")
+  args+=(-n "pdftc-$name-warm" "python \"$ROOT_DIR/pdftc.py\" \"$pdf\" > /dev/null")
 done
 
 hyperfine --warmup 2 --min-runs 5 --export-markdown "$RESULTS_FILE" "${args[@]}"
