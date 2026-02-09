@@ -15,11 +15,8 @@
             runtimeInputs = [
               pkgs.bash
               pkgs.coreutils
-              pkgs.gnused
               pkgs.hyperfine
-              pkgs.pdftk
-              (pkgs.python3.withPackages (ps: [ ps.pikepdf ]))
-              pkgs.ripgrep
+              pdftc
             ];
             text = ''
               if [ ! -f "$PWD/bench/bench.sh" ]; then
@@ -49,7 +46,7 @@
               pkgs.gnused
               pkgs.hyperfine
               pkgs.pdftk
-              (pkgs.python3.withPackages (ps: [ ps.reportlab ps.pikepdf ]))
+              (pkgs.python3.withPackages (ps: [ ps.reportlab ]))
               pkgs.ripgrep
             ];
           };

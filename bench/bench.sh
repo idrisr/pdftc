@@ -22,8 +22,8 @@ done
 args=()
 for name in "${pdfs[@]}"; do
   pdf="$FIXTURES_DIR/${name}.pdf"
-  args+=(-n "pdftc-$name-cold" "python \"$ROOT_DIR/pdftc.py\" --cache-clear \"$pdf\" > /dev/null")
-  args+=(-n "pdftc-$name-warm" "python \"$ROOT_DIR/pdftc.py\" \"$pdf\" > /dev/null")
+  args+=(-n "pdftc-$name-cold" "pdftc --cache-clear \"$pdf\" > /dev/null")
+  args+=(-n "pdftc-$name-warm" "pdftc \"$pdf\" > /dev/null")
 done
 
 hyperfine --warmup 2 --min-runs 5 --export-markdown "$RESULTS_FILE" "${args[@]}"
