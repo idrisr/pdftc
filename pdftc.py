@@ -11,6 +11,7 @@ import pikepdf
 
 NUMBERED_RE = re.compile(r"^(\s+)((\d+\.)+)(\d+)\s")
 CACHE_VERSION = "1"
+TAIL_READ_SIZE = 64 * 1024
 
 
 def apply_number_indent(line):
@@ -67,9 +68,40 @@ def clear_cache_dir(path):
             shutil.rmtree(entry)
 
 
-def hash_file(path):
-    sha = hashlib.sha256()
+def find_startxref_offset(tail):
+    index = tail.rfind(b"startxref")
+    if index == -1:
+        return None
+    match = re.search(rb"startxref\s+(\d+)", tail[index:])
+    if not match:
+        return None
+    try:
+        return int(match.group(1))
+    except ValueError:
+        return None
+
+
+def read_tail(path):
+    size = os.path.getsize(path)
+    read_size = TAIL_READ_SIZE if size > TAIL_READ_SIZE else size
     with open(path, "rb") as handle:
+        if read_size:
+            handle.seek(size - read_size)
+        tail = handle.read(read_size)
+    return tail, size
+
+
+def hash_xref_region(path):
+    tail, size = read_tail(path)
+    offset = find_startxref_offset(tail)
+    sha = hashlib.sha256()
+    if offset is None or offset < 0 or offset >= size:
+        sha.update(b"tail:")
+        sha.update(tail)
+        return sha.hexdigest()
+    with open(path, "rb") as handle:
+        handle.seek(offset)
+        sha.update(b"xref:")
         while True:
             chunk = handle.read(1024 * 1024)
             if not chunk:
@@ -78,9 +110,9 @@ def hash_file(path):
     return sha.hexdigest()
 
 
-def cache_key(file_hash):
+def cache_key(fingerprint):
     version = f"pdftc-cache-v{CACHE_VERSION}-pikepdf-{pikepdf.__version__}"
-    payload = f"{version}:{file_hash}".encode("utf-8")
+    payload = f"{version}:{fingerprint}".encode("utf-8")
     return hashlib.sha256(payload).hexdigest()
 
 
@@ -131,6 +163,11 @@ def parse_args():
         action="store_true",
         help="Clear all cached entries and exit",
     )
+    parser.add_argument(
+        "--cache-info",
+        action="store_true",
+        help="Print cache hit/miss information to stderr",
+    )
     return parser.parse_args()
 
 
@@ -141,6 +178,8 @@ def main():
 
     if args.cache_clear_all:
         clear_cache_dir(cache_dir)
+        if args.cache_info:
+            print(f"cache cleared: {cache_dir}", file=sys.stderr)
         return 0
 
     if not args.pdf:
@@ -150,22 +189,29 @@ def main():
     cache_path = None
     if cache_enabled or args.cache_clear:
         try:
-            file_hash = hash_file(args.pdf)
+            fingerprint = hash_xref_region(args.pdf)
         except FileNotFoundError:
             print(f"{args.pdf} does not exist", file=sys.stderr)
             return 1
         except Exception as exc:
-            print(f"failed to hash pdf: {exc}", file=sys.stderr)
+            print(f"failed to hash pdf cache key: {exc}", file=sys.stderr)
             return 1
 
-        cache_path = os.path.join(cache_dir, f"{cache_key(file_hash)}.txt")
+        cache_path = os.path.join(cache_dir, f"{cache_key(fingerprint)}.txt")
         if args.cache_clear:
             clear_cache_entry(cache_path)
         if cache_enabled:
             cached_output = read_cache(cache_path)
             if cached_output is not None:
+                cache_hit = True
+                if args.cache_info:
+                    print(f"cache hit: {cache_path}", file=sys.stderr)
                 sys.stdout.write(cached_output)
                 return 0
+            if args.cache_info:
+                print(f"cache miss: {cache_path}", file=sys.stderr)
+        elif args.cache_info:
+            print("cache disabled", file=sys.stderr)
     try:
         with pikepdf.open(args.pdf) as pdf:
             outline = pdf.open_outline()

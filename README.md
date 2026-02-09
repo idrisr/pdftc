@@ -44,3 +44,7 @@ Useful flags:
 - `--cache-dir /path` to override the cache location.
 - `--cache-clear` to clear the cache entry for a specific PDF before running.
 - `--cache-clear-all` to wipe all cached entries and exit.
+- `--cache-info` to print cache hit/miss info to stderr.
+
+Cache keys are derived from the PDF xref/trailer region for speed. If a file
+changes without updating that region, you may get a stale cache hit.
